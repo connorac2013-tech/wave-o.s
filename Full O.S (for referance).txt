@@ -34,10 +34,14 @@ NEW IN V5.0: TRUE MULTI-CORE OS ARCHITECTURE
 #include <FS.h>
 #include <SD_MMC.h>
 #include "esp_vfs_fat.h"
+#include "sdmmc_cmd.h" // sdmmc_card_t, used by formatSDCardFAT32()
+#include "driver/sdmmc_host.h" // SDMMC_HOST_DEFAULT/SDMMC_SLOT_CONFIG_DEFAULT, used by formatSDCardFAT32()
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
 
 // ---------- Audio (I2S Codec) Pins ----------
 #define PIN_I2S_MCLK  12
@@ -188,6 +192,7 @@ void processTouchInput(uint16_t tx, uint16_t ty, bool pressEdge, bool touched);
 void processHoldLogic(uint16_t tx, uint16_t ty, bool touched);
 void updateScreenSaverLogic();
 void processCameraFrame();
+void formatClockTime(const struct tm &timeinfo, char* out, size_t outLen, bool withSeconds);
 void drawTaskManager();
 void handleTaskManagerTouch(uint16_t tx, uint16_t ty);
 void drawTaskManagerOverview();
@@ -205,6 +210,9 @@ void drawWShop();
 void handleWShopTouch(uint16_t tx, uint16_t ty);
 void openWShop();
 bool wshopFetchCppFileList();
+bool wshopInstallOTA(int idx);
+void drawCalculator();
+void handleCalculatorTouch(uint16_t tx, uint16_t ty);
 
 // PSRAM framebuffer mirroring screen content (declared here so all functions
 // below can see it; it is allocated later, near setup())
@@ -219,6 +227,7 @@ uint16_t *lcdFB = nullptr;
 #define COL_YELLOW  0xFFE0
 #define COL_GRAY    0xC618
 #define COL_DKGRAY  0x8410
+#define COL_ORANGE  0xFD20
 #define COL_TITLEBAR 0x10A2
 #define COL_MINT    0x07EA
 #define COL_MINT_DK 0x05C4
@@ -235,7 +244,8 @@ enum AppMode {
   MODE_START_MENU, MODE_SCREENSAVER, MODE_IP_EXPLORER, MODE_IP_VIEWER,
   MODE_SPACE_FIGHTERS, MODE_SF_DIFFICULTY, MODE_SETTINGS_SAVER,
   MODE_DRIVER, MODE_FILE_BROWSER, MODE_FILENAME_INPUT, MODE_SD_CONFIRM,
-  MODE_GMAIL_SIGNIN, MODE_EMAIL_INBOX, MODE_EMAIL_COMPOSE, MODE_TASK_MANAGER, MODE_WSHOP
+  MODE_GMAIL_SIGNIN, MODE_EMAIL_INBOX, MODE_EMAIL_COMPOSE, MODE_TASK_MANAGER, MODE_WSHOP,
+  MODE_CALCULATOR
 };
 
 AppMode currentMode = MODE_SPLASH;
@@ -260,10 +270,14 @@ unsigned long camShutterFlashUntil = 0;
 #define FB_LIST_Y0 (FB_HEADER_H)
 #define FB_LIST_Y1 (BAR_Y - FB_BOTTOM_H)
 #define FB_MAX_ROWS ((FB_LIST_Y1 - FB_LIST_Y0) / FB_ROW_H)
-#define GRID_COLS 8
-#define GRID_ROWS 3
+#define GRID_COLS 10
+#define GRID_ROWS 4
 #define CELL_W (LCD_WIDTH / GRID_COLS)
-#define CELL_H (LCD_HEIGHT / GRID_ROWS)
+// FIX: this used to divide by the full LCD_HEIGHT, which let the bottom
+// grid row overlap the 40px control bar (BAR_Y). Divide the usable area
+// above it instead, and the extra rows/cols make each tile smaller and
+// closer together, leaving room for more app slots.
+#define CELL_H ((LCD_HEIGHT - 40) / GRID_ROWS)
 #define DLG_W 320
 #define DLG_H 180
 #define DLG_X ((LCD_WIDTH - DLG_W) / 2)
@@ -290,6 +304,9 @@ char msgBoxLine1[28] = "";
 char msgBoxLine2[28] = "";
 MsgBoxType msgBoxType = MSG_INFO;
 bool msgBoxResetPending = false;
+bool msgBoxFormatSdPending = false;
+bool msgBoxWshopInstallPending = false;
+int  wshopInstallPendingIdx = -1;
 // msgBoxFormatSdPending removed — uses MODE_SD_CONFIRM dialog now
 
 // ---------- Global Settings & State ----------
@@ -304,6 +321,7 @@ bool settingGameSounds = true;
 bool settingScreensaverEnabled = true;
 int settingTimezoneOffset = 0;
 int settingBrightness = 100;
+bool settingUse12Hour = false; // 12-hour (AM/PM) vs 24-hour clock display
 
 // Gmail Settings
 char gmailUsername[64] = "";
@@ -376,10 +394,10 @@ unsigned long lastActivityTime = 0;
 // Start Menu State
 int startMenuTab = 2; // 0=Games, 1=System, 2=All, 3=Removed
 const char* startAppNames[] = {"TTT", "TTT AI", "CHECKERS", "CHK AI", "MINES", "RACING", "SPACE FTR", "DRIVER", "SETTINGS", "WIFI", "CLOCK", "SKETCH", "NOTEPAD", "CAMERA", "IP EXP", "FILES", "GHOST", "EMAIL", "TASK MAN", "W SHOP"};
-int startAppModes[] = {MODE_TICTACTOE, MODE_TICTACTOE_AI, MODE_CHECKERS, MODE_CHECKERS_AI, MODE_MINESWEEPER, MODE_RACING_DIFFICULTY, MODE_SF_DIFFICULTY, MODE_DRIVER, MODE_SETTINGS, MODE_WIFI, MODE_CLOCK, MODE_SKETCHPAD, MODE_NOTEPAD, MODE_CAMERA_DIALOG, MODE_IP_EXPLORER, MODE_FILE_BROWSER, MODE_GHOSTING_WARNING, MODE_EMAIL_INBOX, MODE_TASK_MANAGER, MODE_WSHOP};
-int startAppCats[] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}; // 0=Games, 1=System
-int startAppCount = 20;
-bool startAppRemoved[20] = {false}; // true = app is hidden and lives in the REMOVED tab
+int startAppModes[] = {MODE_TICTACTOE, MODE_TICTACTOE_AI, MODE_CHECKERS, MODE_CHECKERS_AI, MODE_MINESWEEPER, MODE_RACING_DIFFICULTY, MODE_SF_DIFFICULTY, MODE_DRIVER, MODE_SETTINGS, MODE_WIFI, MODE_CLOCK, MODE_SKETCHPAD, MODE_NOTEPAD, MODE_CAMERA_DIALOG, MODE_IP_EXPLORER, MODE_FILE_BROWSER, MODE_GHOSTING_WARNING, MODE_EMAIL_INBOX, MODE_TASK_MANAGER, MODE_WSHOP, MODE_CALCULATOR};
+int startAppCats[] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}; // 0=Games, 1=System
+int startAppCount = 21;
+bool startAppRemoved[21] = {false}; // true = app is hidden and lives in the REMOVED tab
 int appHoldIdx = -1; // start-menu grid app index currently being pressed, or -1
 unsigned long appHoldStart = 0;
 bool appHoldFired = false; // true once a long-press has resolved (entered edit mode) for the current touch
@@ -390,9 +408,9 @@ bool appHoldFired = false; // true once a long-press has resolved (entered edit 
 int launcherHoldIdx = -1;      // launcher grid tile index currently being pressed, or -1
 unsigned long launcherHoldStart = 0;
 bool launcherHoldFired = false; // true once a long-press has resolved (entered edit mode) for the current touch
-// Maps a launcher tile index (0-17) to its corresponding startApp[] index so hiding an app
+// Maps a launcher tile index (0-20) to its corresponding startApp[] index so hiding an app
 // from either screen stays in sync.
-const int launcherToStartIdx[20] = {0, 1, 11, 13, 8, 9, 12, 2, 3, 4, 5, 16, 10, 14, 6, 7, 15, 17, 18, 19};
+const int launcherToStartIdx[21] = {0, 1, 11, 13, 8, 9, 12, 2, 3, 4, 5, 16, 10, 14, 6, 7, 15, 17, 18, 19, 20};
 
 // IP Explorer State
 String ipList[254];
@@ -480,6 +498,7 @@ void saveSettings() {
   prefs.putBool("gamesnd", settingGameSounds);
   prefs.putBool("ssaver", settingScreensaverEnabled);
   prefs.putInt("tz", settingTimezoneOffset);
+  prefs.putBool("time12h", settingUse12Hour);
   prefs.putInt("theme", settingThemeIndex);
   prefs.putInt("bright", settingBrightness);
   prefs.putBool("pin_en", pinEnabled);
@@ -799,6 +818,57 @@ void refreshFileList() {
   if (fileScrollOffset > maxOffset) fileScrollOffset = maxOffset;
 }
 
+// Formats the SD card as FAT32, then hands it back to SD_MMC as normal.
+// arduino-esp32's SD_MMC wrapper keeps its sdmmc_card_t handle as a protected
+// member with no public getter (as of core 3.x), so we can't reach into it.
+// Instead: release SD_MMC's mount, mount the card ourselves with the raw
+// ESP-IDF SDMMC driver just long enough to register + format it, unmount our
+// own handle, then let SD_MMC.begin() remount it the normal way.
+// Returns true on success; status string written to sdFormatStatus.
+char sdFormatStatus[64] = "";
+bool formatSDCardFAT32() {
+  if (!sdCardMounted) { strncpy(sdFormatStatus, "NO SD CARD MOUNTED", sizeof(sdFormatStatus)); return false; }
+  SD_MMC.end(); sdCardMounted = false; // release SD_MMC's own mount/host claim on the slot first
+
+  sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+  host.flags = SDMMC_HOST_FLAG_1BIT; // matches the 1-bit SD_MMC.begin(...) used elsewhere in this file
+  host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+
+  sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+  slot_config.width = 1;
+  slot_config.clk = (gpio_num_t)SD_MMC_CLK_PIN;
+  slot_config.cmd = (gpio_num_t)SD_MMC_CMD_PIN;
+  slot_config.d0  = (gpio_num_t)SD_MMC_D0_PIN;
+
+  esp_vfs_fat_mount_config_t mount_config = {};
+  mount_config.format_if_mount_failed = false;
+  mount_config.max_files = 5;
+  mount_config.allocation_unit_size = 16 * 1024;
+
+  sdmmc_card_t* card = nullptr;
+  esp_err_t err = esp_vfs_fat_sdmmc_mount("/sdfmt", &host, &slot_config, &mount_config, &card);
+  if (err != ESP_OK) {
+    char m[64]; snprintf(m, sizeof(m), "MOUNT FOR FORMAT FAILED (err %d)", (int)err);
+    strncpy(sdFormatStatus, m, sizeof(sdFormatStatus));
+    sdCardMounted = SD_MMC.begin("/sdcard", true, false, 20000); // best-effort: give the card back to SD_MMC
+    return false;
+  }
+
+  err = esp_vfs_fat_sdcard_format("/sdfmt", card);
+  esp_vfs_fat_sdcard_unmount("/sdfmt", card); // release our temporary mount either way
+  if (err != ESP_OK) {
+    char m[64]; snprintf(m, sizeof(m), "FORMAT FAILED (err %d)", (int)err);
+    strncpy(sdFormatStatus, m, sizeof(sdFormatStatus));
+    sdCardMounted = SD_MMC.begin("/sdcard", true, false, 20000);
+    return false;
+  }
+
+  // Remount so the freshly-formatted filesystem is what the rest of the OS sees
+  sdCardMounted = SD_MMC.begin("/sdcard", true, false, 20000);
+  strncpy(sdFormatStatus, sdCardMounted ? "SD CARD FORMATTED - FAT32" : "FORMATTED BUT REMOUNT FAILED", sizeof(sdFormatStatus));
+  return sdCardMounted;
+}
+
 void initSDCard() {
   // Configure EXIO3 (SD_CS) — set HIGH first, then make it an output
   tca9554SetBit(TCA9554_SD_CS_BIT, true); // HIGH before output config
@@ -850,6 +920,7 @@ void loadSettings() {
   settingGameSounds = prefs.getBool("gamesnd", true);
   settingScreensaverEnabled = prefs.getBool("ssaver", true);
   settingTimezoneOffset = prefs.getInt("tz", 0);
+  settingUse12Hour = prefs.getBool("time12h", false);
   settingThemeIndex = prefs.getInt("theme", THEME_MINT);
   settingBrightness = prefs.getInt("bright", 100);
   
@@ -1290,8 +1361,25 @@ void lcdFillScreen(uint16_t color) {
   for (uint32_t c = 0; c < total/512; c++) lcdSPI.transferBytes(buf, nullptr, 1024);
   if (total%512) lcdSPI.transferBytes(buf, nullptr, (total%512)*2); lcdSPI.endTransaction();
 }
+// ---------- Draw Clip Rect ----------
+// A single soft clip rect that every shape primitive respects (they all
+// funnel through lcdFillRect below). Used to hard-guarantee hand-drawn icons
+// can never bleed past their launcher tile, without having to re-audit each
+// icon's pixel offsets individually. Defaults to the full screen (no-op).
+int16_t clipX0 = 0, clipY0 = 0, clipX1 = LCD_WIDTH - 1, clipY1 = LCD_HEIGHT - 1;
+void lcdSetClipRect(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+  clipX0 = x0; clipY0 = y0; clipX1 = x1; clipY1 = y1;
+}
+void lcdClearClipRect() { clipX0 = 0; clipY0 = 0; clipX1 = LCD_WIDTH - 1; clipY1 = LCD_HEIGHT - 1; }
+
 void lcdFillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) {
   if (x >= LCD_WIDTH || y >= LCD_HEIGHT) return; if (x+w > LCD_WIDTH) w = LCD_WIDTH-x; if (y+h > LCD_HEIGHT) h = LCD_HEIGHT-y;
+  // Clip against the current soft clip rect (see lcdSetClipRect above)
+  { int32_t rx0 = x, ry0 = y, rx1 = (int32_t)x + w, ry1 = (int32_t)y + h;
+    if (rx0 < clipX0) rx0 = clipX0; if (ry0 < clipY0) ry0 = clipY0;
+    if (rx1 > (int32_t)clipX1 + 1) rx1 = (int32_t)clipX1 + 1; if (ry1 > (int32_t)clipY1 + 1) ry1 = (int32_t)clipY1 + 1;
+    if (rx1 <= rx0 || ry1 <= ry0) return;
+    x = (uint16_t)rx0; y = (uint16_t)ry0; w = (uint16_t)(rx1 - rx0); h = (uint16_t)(ry1 - ry0); }
   // Mirror to PSRAM framebuffer
   if (lcdFB) { for (uint16_t yy = 0; yy < h; yy++) { uint16_t *row = lcdFB + (y + yy) * LCD_WIDTH + x; for (uint16_t xx = 0; xx < w; xx++) row[xx] = color; } }
   lcdSetAddrWindow(x, y, x+w-1, y+h-1); lcdSPI.beginTransaction(SPISettings(40000000, MSBFIRST, SPI_MODE0));
@@ -1484,8 +1572,8 @@ void drawControlBar() {
   // VOLUME + (with clock)
   struct tm timeinfo;
   if (getLocalTime(&timeinfo, 100)) {
-    char timeStr[8];
-    strftime(timeStr, sizeof(timeStr), "%H:%M", &timeinfo);
+    char timeStr[12];
+    formatClockTime(timeinfo, timeStr, sizeof(timeStr), false);
     lcdDrawTextCentered(BAR_BTN_W*7, BAR_BTN_W, BAR_Y+4, timeStr, COL_WHITE, 1);
   }
   lcdDrawTextCentered(BAR_BTN_W*7, BAR_BTN_W, BAR_Y+BAR_H-10, vStr, COL_YELLOW, 1);
@@ -1730,6 +1818,7 @@ void launchStartMenuApp(int appIdx) {
   else if (mode == MODE_EMAIL_INBOX) drawEmailInbox();
   else if (mode == MODE_TASK_MANAGER) drawTaskManager();
   else if (mode == MODE_WSHOP) drawWShop();
+  else if (mode == MODE_CALCULATOR) drawCalculator();
 }
 
 // ---------- Power Menu ----------
@@ -2048,6 +2137,9 @@ void drawSettingsPrivacy() {
   y += rowH + 3;
   drawSettingsCard(cardX, y, cardW, rowH, COL_RED, COL_RED);
   lcdDrawTextCentered(cardX, cardW, y + 10, "FACTORY RESET ALL SETTINGS", COL_WHITE, 1);
+  y += rowH + 3;
+  drawSettingsCard(cardX, y, cardW, rowH, sdCardMounted ? COL_ORANGE : COL_GRAY, COL_RED);
+  lcdDrawTextCentered(cardX, cardW, y + 10, sdCardMounted ? "FORMAT SD CARD (FAT32)" : "FORMAT SD CARD (NO CARD)", COL_WHITE, 1);
   // No bottom control bar - this card used to be almost entirely hidden behind it.
 }
 
@@ -2067,6 +2159,10 @@ void handleSettingsPrivacyTouch(uint16_t tx, uint16_t ty) {
     uiClick(); pinSetupMode = true; pinNewLen = 0; pinEntryLen = 0; memset(pinEntry, 0, sizeof(pinEntry)); currentMode = MODE_PIN_ENTRY; drawPinEntryScreen();
   } else if (row == 6) {
     uiClick(); showMessageBox(MSG_QUESTION, "FACTORY RESET?", "THIS WILL ERASE ALL", "SETTINGS. CONTINUE?", MODE_SETTINGS_PRIVACY); msgBoxResetPending = true;
+  } else if (row == 7) {
+    uiClick();
+    if (!sdCardMounted) { showMessageBox(MSG_WARN, "NO SD CARD", "NO SD CARD IS", "CURRENTLY MOUNTED", MODE_SETTINGS_PRIVACY); return; }
+    showMessageBox(MSG_QUESTION, "FORMAT SD CARD?", "THIS WILL ERASE ALL", "FILES. CONTINUE?", MODE_SETTINGS_PRIVACY); msgBoxFormatSdPending = true;
   }
 }
 
@@ -2279,6 +2375,13 @@ void drawSettingsTime() {
   char tzStr[8]; snprintf(tzStr, sizeof(tzStr), "%d", settingTimezoneOffset);
   lcdDrawTextCentered(LCD_WIDTH-116, 40, y+11, tzStr, COL_YELLOW, 1);
   lcdFillRect(LCD_WIDTH-60, y+5, 26, 20, 0x4208); lcdDrawTextCentered(LCD_WIDTH-60, 26, y+11, "+", COL_WHITE, 1);
+  // 12-Hour Time Card
+  y += rowH + 8;
+  drawSettingsCard(cardX, y, cardW, rowH, getThemeSecondary(), getThemePrimary());
+  lcdDrawText(cardX + 12, y + 10, "12 HOUR TIME", COL_WHITE, 1);
+  int togW = 50, togH = 22, togX = LCD_WIDTH - 30 - togW, togY = y + (rowH - togH) / 2;
+  lcdFillRect(togX, togY, togW, togH, settingUse12Hour ? COL_GREEN : 0x4208);
+  lcdFillCircle(settingUse12Hour ? togX + togW - togH/2 : togX + togH/2, togY + togH/2, togH/2 - 3, COL_WHITE);
   // No bottom control bar.
 }
 
@@ -2291,6 +2394,12 @@ void handleSettingsTimeTouch(uint16_t tx, uint16_t ty) {
   if (ty >= yTz && ty < yTz + rowH) {
     if (tx >= LCD_WIDTH-150 && tx < LCD_WIDTH-124) { uiClick(); settingTimezoneOffset = max(-12, settingTimezoneOffset - 1); drawSettingsTime(); saveSettings(); }
     else if (tx >= LCD_WIDTH-60 && tx < LCD_WIDTH-34) { uiClick(); settingTimezoneOffset = min(12, settingTimezoneOffset + 1); drawSettingsTime(); saveSettings(); }
+    return;
+  }
+  // 12-Hour Time toggle row
+  int y12 = yTz + rowH + 8;
+  if (ty >= y12 && ty < y12 + rowH) {
+    uiClick(); settingUse12Hour = !settingUse12Hour; drawSettingsTime(); saveSettings();
     return;
   }
 }
@@ -2473,7 +2582,8 @@ bool handleGhostingWarningTouch(uint16_t tx, uint16_t ty) {
     ghostingStartTime = millis();
     ghostingLastToggle = millis();
     ghostingState = false;
-    lcdFillScreen(COL_BLACK);
+    GpuTaskMessage gmsg = {GPU_CMD_FILL_SCREEN, {COL_BLACK}};
+    xQueueSend(gpuQueue, &gmsg, pdMS_TO_TICKS(10));
     return true;
   }
   return false;
@@ -2487,14 +2597,14 @@ bool handleGhostingWarningTouch(uint16_t tx, uint16_t ty) {
 // last one anyone bothered to code a matrix for — automatically falls
 // back to the default "W" badge + title instead of drawing nothing or
 // crashing on an out-of-range array read.
-#define MAX_APPS 20
-const char* appLabels[MAX_APPS] = {"TTT", "TTT AI", "SKETCH", "CAMERA", "SETTINGS", "WIFI", "NOTEPAD", "CHECKERS", "CHK+AI", "MINES", "RACING", "GHOST", "CLOCK", "IP EXP", "SPACE", "DRIVER", "FILES", "EMAIL", "TASK MGR", "W SHOP"};
-// Set to true for every idx that has a hand-drawn icon in the switch below (0..19 all do today).
-// When you add app #20+ without drawing a matrix for it yet, just leave its slot false (or
+#define MAX_APPS 21
+const char* appLabels[MAX_APPS] = {"TTT", "TTT AI", "SKETCH", "CAMERA", "SETTINGS", "WIFI", "NOTEPAD", "CHECKERS", "CHK+AI", "MINES", "RACING", "GHOST", "CLOCK", "IP EXP", "SPACE", "DRIVER", "FILES", "EMAIL", "TASK MGR", "W SHOP", "CALC"};
+// Set to true for every idx that has a hand-drawn icon in the switch below (0..20 all do today).
+// When you add app #21+ without drawing a matrix for it yet, just leave its slot false (or
 // grow the arrays with false) and it will render as the default W-badge automatically.
 bool appHasCustomIcon[MAX_APPS] = {
   true, true, true, true, true, true, true, true, true, true,
-  true, true, true, true, true, true, true, true, true, true
+  true, true, true, true, true, true, true, true, true, true, true
 };
 // Safe label lookup — returns "APP" for any appId outside the known range
 // instead of reading garbage / crashing, so unregistered slots still show text.
@@ -2527,16 +2637,21 @@ void drawLauncher() {
       if (!appHasCustomIcon[appId]) {
         // AIO fallback path: no matrix coded for this app yet — draw default W badge + label and skip the hand-coded switch entirely
         int x = c * CELL_W, y = r * CELL_H;
-        lcdFillRect(x+2, y+2, CELL_W-4, CELL_H-4, tileFill);
-        drawDefaultAppIcon(x + CELL_W/2, y + CELL_H/2 - 4);
+        int sq = CELL_W - 4; // square tile background, sized to the narrower dimension (CELL_W) so it's a true square
+        lcdFillRect(x+2, y+2, sq, sq, tileFill);
+        lcdSetClipRect(x+2, y+2, x+2+sq-1, y+2+sq-1); // hard-clip icon to its own square tile
+        drawDefaultAppIcon(x + CELL_W/2, y + 2 + sq/2);
+        lcdClearClipRect();
         lcdDrawTextCentered(x+2, CELL_W-4, y + CELL_H - 16, labels[appId], COL_WHITE, 1);
         appId++;
         continue;
       }
       int x = c * CELL_W, y = r * CELL_H;
       int idx = appId; // original app id — reused below by the icon-drawing switch
-      lcdFillRect(x+2, y+2, CELL_W-4, CELL_H-4, tileFill);
-      int cx = x + CELL_W/2, cy = y + CELL_H/2 - 4;
+      int sq = CELL_W - 4; // square tile background, sized to the narrower dimension (CELL_W) so it's a true square
+      lcdFillRect(x+2, y+2, sq, sq, tileFill);
+      int cx = x + CELL_W/2, cy = y + 2 + sq/2;
+      lcdSetClipRect(x+2, y+2, x+2+sq-1, y+2+sq-1); // hard-clip icon to its own square tile — icons can never bleed into neighbors regardless of pixel offsets
       if (idx == 0) { // TTT: bold double-stroke X and a shaded O, offset so both read clearly
         lcdDrawLine(cx-18, cy-18, cx-2, cy-2, COL_RED); lcdDrawLine(cx-19, cy-17, cx-3, cy-1, COL_RED);
         lcdDrawLine(cx-2, cy-18, cx-18, cy-2, COL_RED); lcdDrawLine(cx-3, cy-17, cx-19, cy-1, COL_RED);
@@ -2664,6 +2779,7 @@ void drawLauncher() {
         lcdFillCircle(cx+14, cy-16, 9, COL_GREEN); lcdDrawCircle(cx+14, cy-16, 9, COL_BLACK);
         lcdFillRect(cx+11, cy-17, 6, 2, COL_WHITE); lcdFillRect(cx+13, cy-19, 2, 6, COL_WHITE);
       }
+      lcdClearClipRect(); // done drawing this tile's icon — release the clip
       lcdDrawTextCentered(x+2, CELL_W-4, y + CELL_H - 16, labels[idx], COL_WHITE, 1);
       if (launcherHoldIdx == idx && !launcherHoldFired && launcherHoldStart != 0) {
         // Hold-progress indicator (red line) while the icon is being held down to remove it
@@ -2700,6 +2816,7 @@ void launchLauncherApp(int idx) {
   else if (idx == 17) { currentMode = MODE_EMAIL_INBOX; drawEmailInbox(); }
   else if (idx == 18) { currentMode = MODE_TASK_MANAGER; GpuTaskMessage msg = {GPU_CMD_CUSTOM_DRAW, {}, nullptr, nullptr, drawTaskManager}; xQueueSend(gpuQueue, &msg, pdMS_TO_TICKS(10)); }
   else if (idx == 19) { openWShop(); }
+  else if (idx == 20) { currentMode = MODE_CALCULATOR; drawCalculator(); }
 }
 void handleLauncherTouch(uint16_t tx, uint16_t ty) {
   if (ty >= BAR_Y) return;
@@ -3162,6 +3279,21 @@ void handleSpaceFightersTouch(uint16_t tx, uint16_t ty) {
 char clkLastStr[24] = "";
 bool clkSynced = false;
 void ntpSyncNow() { configTime(settingTimezoneOffset * 3600, 0, "pool.ntp.org", "time.nist.gov"); }
+
+// Formats timeinfo into out respecting settingUse12Hour ("3:07 PM" / "3:07:22 PM"
+// vs "15:07" / "15:07:22"). Centralized so every clock on screen (status bar,
+// CLOCK app, email timestamps) agrees with the TIME settings toggle.
+void formatClockTime(const struct tm &timeinfo, char* out, size_t outLen, bool withSeconds) {
+  if (!settingUse12Hour) {
+    if (withSeconds) strftime(out, outLen, "%H:%M:%S", &timeinfo);
+    else strftime(out, outLen, "%H:%M", &timeinfo);
+    return;
+  }
+  int h12 = timeinfo.tm_hour % 12; if (h12 == 0) h12 = 12;
+  const char* ampm = (timeinfo.tm_hour < 12) ? "AM" : "PM";
+  if (withSeconds) snprintf(out, outLen, "%d:%02d:%02d %s", h12, timeinfo.tm_min, timeinfo.tm_sec, ampm);
+  else snprintf(out, outLen, "%d:%02d %s", h12, timeinfo.tm_min, ampm);
+}
 
 // ---------- Notification System ----------
 char notificationText[64] = "";
@@ -3896,18 +4028,21 @@ void handleEmailComposeTouch(uint16_t tx, uint16_t ty) {
   }
 }
 
-// ---------- W Shop: GitHub repo .cpp file browser ----------
-// Opening W Shop scans the repo's file tree for .cpp files over HTTPS and
-// lists them. Per file you can DOWNLOAD it to the SD card, and once
-// downloaded, UNINSTALL (delete it again) or CHECK it.
+// ---------- W Shop: GitHub repo firmware installer (real OTA) ----------
+// HOW THIS ACTUALLY WORKS: the ESP32-S3 has no C/C++ compiler on it, so
+// nothing compiles on-device. Instead, W Shop lists prebuilt ".bin" firmware
+// images that a CI pipeline (e.g. a GitHub Actions workflow in the repo) has
+// already compiled from source and published under a "firmware/" (or repo
+// root) path on the given branch. Tapping INSTALL streams that .bin straight
+// from raw.githubusercontent.com into the inactive OTA partition via
+// esp_ota_*, marks it bootable, and reboots into it - so "download -> app is
+// now running" is genuinely true, it just means "the repo's CI already built
+// this .bin for you" rather than "the watch compiled it."
 //
-// IMPORTANT HONEST LIMITATION: "CHECK" is a lightweight heuristic scan
-// (brace/paren/bracket balance + presence of at least one semicolon), not a
-// real compiler pass. The ESP32-S3 has no C/C++ compiler or linker on the
-// device, so nothing here actually compiles the file or performs true syntax
-// checking (that would require a full toolchain, which doesn't run on this
-// chip) - it's a best-effort sanity check only, and is labeled as such on
-// screen so it's never mistaken for "this file will build."
+// Repo-side requirement for this to work: a workflow that builds the .ino
+// with arduino-cli/PlatformIO and commits/releases the resulting .bin
+// (partition-offset app image, not the full merged image) back into the repo
+// or a release, named e.g. "firmware/wave_os_v5.bin".
 #define COL_CYAN 0x07FF
 const char* WSHOP_REPO_OWNER = "connorac2013-tech";
 const char* WSHOP_REPO_NAME  = "wave-o.s";
@@ -3919,7 +4054,7 @@ int  wshopCppFileCount = 0;
 char wshopFetchStatus[80] = "";
 bool wshopFetchOk = false;
 int  wshopRepoScrollOffset = 0;
-char wshopUsedBranch[8] = "main";
+char wshopUsedBranch[24] = "main";
 
 // Turns a repo path like "src/foo/bar.cpp" into a flat SD filename like
 // "/wshop_src_foo_bar.cpp" so nested paths don't need real subfolders.
@@ -3930,6 +4065,47 @@ void wshopLocalPath(int idx, char* out, size_t outLen) {
   snprintf(out, outLen, "/wshop_%s", tmp);
 }
 
+// Asks GitHub what the repo's actual default branch is (e.g. "main",
+// "master", or anything else someone renamed it to) instead of guessing.
+// Writes into outBranch and returns true on success. A 404 here almost
+// always means WSHOP_REPO_OWNER/WSHOP_REPO_NAME don't exactly match an
+// existing PUBLIC repo (private repos need an auth token this code doesn't
+// send), rather than a branch-naming problem.
+bool wshopFetchDefaultBranch(char* outBranch, size_t outLen) {
+  WiFiClientSecure client; client.setInsecure();
+  HTTPClient http;
+  char url[128];
+  snprintf(url, sizeof(url), "https://api.github.com/repos/%s/%s", WSHOP_REPO_OWNER, WSHOP_REPO_NAME);
+  if (!http.begin(client, url)) return false;
+  http.addHeader("User-Agent", "WaveOS-WShop");
+  http.addHeader("Accept", "application/vnd.github+json");
+  int code = http.GET();
+  if (code != 200) {
+    char msg[80]; snprintf(msg, sizeof(msg), "REPO LOOKUP FAILED (HTTP %d)", code);
+    strncpy(wshopFetchStatus, msg, sizeof(wshopFetchStatus));
+    http.end(); return false;
+  }
+  WiFiClient* stream = http.getStreamPtr();
+  const char* key = "\"default_branch\":\"";
+  int keyPos = 0; bool inValue = false;
+  char valBuf[24]; int valLen = 0;
+  unsigned long lastByte = millis(); bool found = false;
+  while (http.connected() && (stream->available() || millis() - lastByte < 5000)) {
+    if (!stream->available()) { delay(2); continue; }
+    char c = stream->read(); lastByte = millis();
+    if (!inValue) {
+      if (c == key[keyPos]) { keyPos++; if (key[keyPos] == '\0') { inValue = true; valLen = 0; keyPos = 0; } }
+      else { keyPos = (c == key[0]) ? 1 : 0; }
+    } else {
+      if (c == '"') { valBuf[valLen] = '\0'; found = true; break; }
+      if (valLen < (int)sizeof(valBuf) - 1) valBuf[valLen++] = c;
+    }
+  }
+  http.end();
+  if (found) { strncpy(outBranch, valBuf, outLen - 1); outBranch[outLen - 1] = '\0'; }
+  return found;
+}
+
 // Reads the HTTPS JSON response body from the GitHub trees API one char at a
 // time (no buffering the whole response - trees can be large) looking for
 // `"path":"...."` entries whose value ends in ".cpp", and collects them.
@@ -3937,8 +4113,19 @@ bool wshopFetchCppFileList() {
   wshopCppFileCount = 0; wshopRepoScrollOffset = 0; wshopFetchOk = false;
   if (WiFi.status() != WL_CONNECTED) { strncpy(wshopFetchStatus, "NOT CONNECTED TO WIFI", sizeof(wshopFetchStatus)); return false; }
 
-  const char* branches[] = {"main", "master"};
-  for (int b = 0; b < 2; b++) {
+  // Try the repo's real default branch first (avoids guessing wrong and
+  // getting a 404 on repos that use neither "main" nor "master"), then fall
+  // back to the two common names if that lookup itself fails (e.g. offline
+  // API hiccup) so this still has a shot at working.
+  char defaultBranch[24] = "";
+  const char* branches[3]; int branchCount = 0;
+  if (wshopFetchDefaultBranch(defaultBranch, sizeof(defaultBranch))) branches[branchCount++] = defaultBranch;
+  else { strncpy(wshopFetchStatus, "REPO NOT FOUND - CHECK OWNER/NAME", sizeof(wshopFetchStatus)); wshopFetchOk = false; return false; }
+  branches[branchCount++] = "main"; branches[branchCount++] = "master";
+
+  for (int b = 0; b < branchCount; b++) {
+    // Skip duplicate attempts if default branch happens to be "main"/"master"
+    if (b > 0 && strcmp(branches[b], branches[0]) == 0) continue;
     WiFiClientSecure client;
     client.setInsecure(); // GitHub's cert chain isn't pinned/embedded on-device
     HTTPClient http;
@@ -3971,7 +4158,7 @@ bool wshopFetchCppFileList() {
         if (c == '"') {
           valBuf[valLen] = '\0'; inValue = false;
           int vlen = valLen;
-          if (vlen >= 4 && strcmp(valBuf + vlen - 4, ".cpp") == 0 && wshopCppFileCount < WSHOP_MAX_CPP_FILES) {
+          if (vlen >= 4 && strcmp(valBuf + vlen - 4, ".bin") == 0 && wshopCppFileCount < WSHOP_MAX_CPP_FILES) {
             strncpy(wshopCppFiles[wshopCppFileCount], valBuf, WSHOP_PATH_MAXLEN - 1);
             wshopCppFiles[wshopCppFileCount][WSHOP_PATH_MAXLEN - 1] = '\0';
             wshopCppFileCount++;
@@ -3986,7 +4173,7 @@ bool wshopFetchCppFileList() {
 
     if (wshopCppFileCount > 0) {
       strncpy(wshopUsedBranch, branches[b], sizeof(wshopUsedBranch) - 1); wshopUsedBranch[sizeof(wshopUsedBranch) - 1] = '\0';
-      char msg[80]; snprintf(msg, sizeof(msg), "FOUND %d .cpp FILE(S) ON %s", wshopCppFileCount, branches[b]);
+      char msg[80]; snprintf(msg, sizeof(msg), "FOUND %d .bin FILE(S) ON %s", wshopCppFileCount, branches[b]);
       strncpy(wshopFetchStatus, msg, sizeof(wshopFetchStatus));
       wshopFetchOk = true;
       // Mark which ones are already sitting on the SD card from a prior download
@@ -3997,8 +4184,16 @@ bool wshopFetchCppFileList() {
       }
       return true;
     }
-    strncpy(wshopFetchStatus, "NO .cpp FILES FOUND", sizeof(wshopFetchStatus));
+    strncpy(wshopFetchStatus, "NO .bin FILES FOUND", sizeof(wshopFetchStatus));
     wshopFetchOk = true; // request succeeded, repo just has none / branch empty
+    // FIX: branches[0] is always the repo's *real* default branch (confirmed
+    // via the GitHub API above) - if that query came back 200, it's
+    // authoritative. Falling through to try "main"/"master" as well was
+    // pointless (those are just guesses for when the API lookup itself
+    // fails, which didn't happen here) and it clobbered this correct
+    // "NO .bin FILES FOUND" status with a misleading "HTTP 404 ON BRANCH
+    // master" once it tried a branch name that doesn't exist in the repo.
+    break;
   }
   return wshopFetchOk;
 }
@@ -4035,9 +4230,9 @@ void drawWShopLoading(const char* msg) {
   lcdDrawTextCentered(0, LCD_WIDTH, cy + r + 36, repoLine, COL_GRAY, 1);
 }
 
-// Streams a file straight from raw.githubusercontent.com to the SD card
-// while tallying brace/paren/bracket balance and semicolon presence as it
-// goes, for the heuristic check below.
+// Optional: saves a raw copy of the .bin to SD (backup / manual flashing via
+// a PC tool later). Not required for INSTALL below, which streams straight
+// into the OTA partition without touching SD at all.
 bool wshopDownloadFile(int idx) {
   if (idx < 0 || idx >= wshopCppFileCount) return false;
   if (!sdCardMounted) { strncpy(wshopFetchStatus, "NO SD CARD MOUNTED", sizeof(wshopFetchStatus)); return false; }
@@ -4059,9 +4254,9 @@ bool wshopDownloadFile(int idx) {
   if (!f) { strncpy(wshopFetchStatus, "SD WRITE FAILED", sizeof(wshopFetchStatus)); http.end(); return false; }
 
   WiFiClient* stream = http.getStreamPtr();
-  int braceBal = 0, parenBal = 0, bracketBal = 0; bool sawSemicolon = false; size_t bytes = 0;
+  size_t bytes = 0;
   unsigned long lastByte = millis();
-  uint8_t buf[256];
+  uint8_t buf[512];
   while (http.connected() && (stream->available() || millis() - lastByte < 5000)) {
     if (!stream->available()) { delay(2); continue; }
     size_t avail = stream->available();
@@ -4069,45 +4264,12 @@ bool wshopDownloadFile(int idx) {
     if (n <= 0) continue;
     lastByte = millis();
     f.write(buf, n); bytes += n;
-    for (int i = 0; i < n; i++) {
-      char c = (char)buf[i];
-      if (c == '{') braceBal++; else if (c == '}') braceBal--;
-      else if (c == '(') parenBal++; else if (c == ')') parenBal--;
-      else if (c == '[') bracketBal++; else if (c == ']') bracketBal--;
-      else if (c == ';') sawSemicolon = true;
-    }
   }
   f.close(); http.end();
   wshopFileDownloaded[idx] = true;
-  bool balanced = (braceBal == 0 && parenBal == 0 && bracketBal == 0);
-  char m[80];
-  snprintf(m, sizeof(m), "DOWNLOADED %uB - BASIC CHECK: %s", (unsigned)bytes, balanced ? (sawSemicolon ? "OK" : "OK (NO ';')") : "MISMATCHED { } / ( ) / [ ]");
+  char m[80]; snprintf(m, sizeof(m), "SAVED %uB TO SD", (unsigned)bytes);
   strncpy(wshopFetchStatus, m, sizeof(wshopFetchStatus));
   return true;
-}
-
-// Heuristic re-check of an already-downloaded file. NOT a compiler - just
-// brace/paren/bracket balance and semicolon presence, so it can catch a
-// truncated download or obviously broken file, nothing more.
-bool wshopCheckFileSyntax(int idx) {
-  if (idx < 0 || idx >= wshopCppFileCount) return false;
-  char localPath[80]; wshopLocalPath(idx, localPath, sizeof(localPath));
-  File f = SD_MMC.open(localPath, "r");
-  if (!f) { strncpy(wshopFetchStatus, "FILE NOT FOUND ON SD", sizeof(wshopFetchStatus)); return false; }
-  int braceBal = 0, parenBal = 0, bracketBal = 0; bool sawSemicolon = false; size_t bytes = 0;
-  while (f.available()) {
-    char c = f.read(); bytes++;
-    if (c == '{') braceBal++; else if (c == '}') braceBal--;
-    else if (c == '(') parenBal++; else if (c == ')') parenBal--;
-    else if (c == '[') bracketBal++; else if (c == ']') bracketBal--;
-    else if (c == ';') sawSemicolon = true;
-  }
-  f.close();
-  bool balanced = (braceBal == 0 && parenBal == 0 && bracketBal == 0);
-  char m[80];
-  snprintf(m, sizeof(m), "BASIC CHECK (%uB): %s", (unsigned)bytes, balanced ? (sawSemicolon ? "OK" : "OK (NO ';')") : "MISMATCHED { } / ( ) / [ ]");
-  strncpy(wshopFetchStatus, m, sizeof(wshopFetchStatus));
-  return balanced;
 }
 
 void wshopUninstallFile(int idx) {
@@ -4115,7 +4277,95 @@ void wshopUninstallFile(int idx) {
   char localPath[80]; wshopLocalPath(idx, localPath, sizeof(localPath));
   SD_MMC.remove(localPath);
   wshopFileDownloaded[idx] = false;
-  strncpy(wshopFetchStatus, "UNINSTALLED - FILE REMOVED FROM SD", sizeof(wshopFetchStatus));
+  strncpy(wshopFetchStatus, "REMOVED BACKUP FROM SD", sizeof(wshopFetchStatus));
+}
+
+// Progress shown during OTA so the person isn't staring at a frozen screen
+// mid-flash (which would look like a hang/brick otherwise).
+void drawWShopOtaProgress(size_t written, size_t total) {
+  lcdFillScreen(getThemeBg());
+  lcdFillRect(0, 0, LCD_WIDTH, 36, getThemePrimary());
+  lcdDrawTextCentered(0, LCD_WIDTH, 10, "W SHOP - INSTALLING", COL_WHITE, 1);
+  int barX = 40, barY = 150, barW = LCD_WIDTH - 80, barH = 24;
+  lcdDrawRect(barX, barY, barW, barH, COL_WHITE);
+  int pct = total > 0 ? (int)((uint32_t)written * 100 / total) : 0;
+  if (pct > 100) pct = 100;
+  lcdFillRect(barX + 2, barY + 2, (barW - 4) * pct / 100, barH - 4, COL_GREEN);
+  char pctStr[16]; snprintf(pctStr, sizeof(pctStr), "%d%%", pct);
+  lcdDrawTextCentered(0, LCD_WIDTH, barY + barH + 12, pctStr, COL_WHITE, 1);
+  lcdDrawTextCentered(0, LCD_WIDTH, barY - 20, "DO NOT DISCONNECT POWER", COL_YELLOW, 1);
+}
+
+// The real install step: streams the prebuilt .bin directly from GitHub into
+// the inactive OTA partition (esp_ota_begin/write/end), marks it as the boot
+// partition, then restarts into it. This is genuine OTA flashing, not a
+// simulation - if this returns true the device will boot the new image on
+// the next restart (which this function itself triggers).
+bool wshopInstallOTA(int idx) {
+  if (idx < 0 || idx >= wshopCppFileCount) return false;
+  if (WiFi.status() != WL_CONNECTED) { strncpy(wshopFetchStatus, "NOT CONNECTED TO WIFI", sizeof(wshopFetchStatus)); return false; }
+
+  const esp_partition_t* updatePart = esp_ota_get_next_update_partition(NULL);
+  if (!updatePart) { strncpy(wshopFetchStatus, "NO OTA PARTITION AVAILABLE", sizeof(wshopFetchStatus)); return false; }
+
+  char url[220];
+  snprintf(url, sizeof(url), "https://raw.githubusercontent.com/%s/%s/%s/%s", WSHOP_REPO_OWNER, WSHOP_REPO_NAME, wshopUsedBranch, wshopCppFiles[idx]);
+  WiFiClientSecure client; client.setInsecure();
+  HTTPClient http;
+  if (!http.begin(client, url)) { strncpy(wshopFetchStatus, "COULD NOT OPEN CONNECTION", sizeof(wshopFetchStatus)); return false; }
+  http.addHeader("User-Agent", "WaveOS-WShop");
+  int code = http.GET();
+  if (code != 200) {
+    char m[80]; snprintf(m, sizeof(m), "DOWNLOAD FAILED (HTTP %d)", code);
+    strncpy(wshopFetchStatus, m, sizeof(wshopFetchStatus)); http.end(); return false;
+  }
+  int totalLen = http.getSize(); // -1 if server didn't send Content-Length
+  if (totalLen <= 0) { strncpy(wshopFetchStatus, "SERVER DIDN'T REPORT SIZE", sizeof(wshopFetchStatus)); http.end(); return false; }
+  if ((size_t)totalLen > updatePart->size) { strncpy(wshopFetchStatus, "IMAGE TOO LARGE FOR OTA SLOT", sizeof(wshopFetchStatus)); http.end(); return false; }
+
+  esp_ota_handle_t otaHandle = 0;
+  esp_err_t err = esp_ota_begin(updatePart, totalLen, &otaHandle);
+  if (err != ESP_OK) {
+    char m[80]; snprintf(m, sizeof(m), "OTA BEGIN FAILED (err %d)", (int)err);
+    strncpy(wshopFetchStatus, m, sizeof(wshopFetchStatus)); http.end(); return false;
+  }
+
+  WiFiClient* stream = http.getStreamPtr();
+  size_t written = 0; bool writeFailed = false;
+  unsigned long lastByte = millis();
+  uint8_t buf[1024];
+  while (http.connected() && written < (size_t)totalLen && (stream->available() || millis() - lastByte < 8000)) {
+    if (!stream->available()) { delay(2); continue; }
+    size_t avail = stream->available();
+    int n = stream->readBytes(buf, avail > sizeof(buf) ? sizeof(buf) : avail);
+    if (n <= 0) continue;
+    lastByte = millis();
+    if (esp_ota_write(otaHandle, buf, n) != ESP_OK) { writeFailed = true; break; }
+    written += n;
+    if ((written & 0x3FFF) == 0 || written == (size_t)totalLen) drawWShopOtaProgress(written, totalLen); // throttle redraws
+  }
+  http.end();
+
+  if (writeFailed || written != (size_t)totalLen) {
+    esp_ota_abort(otaHandle);
+    char m[80]; snprintf(m, sizeof(m), "TRANSFER FAILED (%uB / %uB)", (unsigned)written, (unsigned)totalLen);
+    strncpy(wshopFetchStatus, m, sizeof(wshopFetchStatus)); return false;
+  }
+  err = esp_ota_end(otaHandle);
+  if (err != ESP_OK) {
+    char m[80]; snprintf(m, sizeof(m), "OTA END FAILED (err %d) - IMAGE INVALID?", (int)err);
+    strncpy(wshopFetchStatus, m, sizeof(wshopFetchStatus)); return false;
+  }
+  err = esp_ota_set_boot_partition(updatePart);
+  if (err != ESP_OK) {
+    char m[80]; snprintf(m, sizeof(m), "SET BOOT PARTITION FAILED (err %d)", (int)err);
+    strncpy(wshopFetchStatus, m, sizeof(wshopFetchStatus)); return false;
+  }
+  strncpy(wshopFetchStatus, "INSTALLED - RESTARTING...", sizeof(wshopFetchStatus));
+  drawWShopOtaProgress(totalLen, totalLen);
+  delay(600);
+  esp_restart();
+  return true; // unreachable, but keeps the compiler happy
 }
 
 #define WSHOP_REPO_ROW_H 46
@@ -4161,17 +4411,18 @@ void drawWShop() {
     lcdFillRect(10, rowY, LCD_WIDTH - 20, WSHOP_REPO_ROW_H - 4, getThemeSecondary());
     lcdDrawText(16, rowY + 5, wshopCppFiles[idx], COL_WHITE, 1);
     int btnY = rowY + 20, btnH = 20;
+    // INSTALL: the real OTA action - flashes this .bin and reboots into it
+    int instW = 90, instX = LCD_WIDTH - 100;
+    lcdFillRect(instX, btnY, instW, btnH, COL_GREEN); lcdFillRect(instX + 2, btnY + 2, instW - 4, btnH - 4, getThemeBg());
+    lcdDrawTextCentered(instX, instW, btnY + 5, "INSTALL", COL_GREEN, 1);
+    // Secondary: SD backup toggle (not required for install)
+    int bkW = 84, bkX = LCD_WIDTH - 190;
     if (wshopFileDownloaded[idx]) {
-      int checkW = 84, checkX = LCD_WIDTH - 190;
-      lcdFillRect(checkX, btnY, checkW, btnH, getThemePrimary());
-      lcdDrawTextCentered(checkX, checkW, btnY + 5, "CHECK", COL_WHITE, 1);
-      int unW = 90, unX = LCD_WIDTH - 100;
-      lcdFillRect(unX, btnY, unW, btnH, COL_RED); lcdFillRect(unX + 2, btnY + 2, unW - 4, btnH - 4, getThemeBg());
-      lcdDrawTextCentered(unX, unW, btnY + 5, "UNINSTALL", COL_RED, 1);
+      lcdFillRect(bkX, btnY, bkW, btnH, COL_RED); lcdFillRect(bkX + 2, btnY + 2, bkW - 4, btnH - 4, getThemeBg());
+      lcdDrawTextCentered(bkX, bkW, btnY + 5, "DEL BKUP", COL_RED, 1);
     } else {
-      int dlW = 90, dlX = LCD_WIDTH - 100;
-      lcdFillRect(dlX, btnY, dlW, btnH, COL_GREEN); lcdFillRect(dlX + 2, btnY + 2, dlW - 4, btnH - 4, getThemeBg());
-      lcdDrawTextCentered(dlX, dlW, btnY + 5, "DOWNLOAD", COL_GREEN, 1);
+      lcdFillRect(bkX, btnY, bkW, btnH, getThemePrimary());
+      lcdDrawTextCentered(bkX, bkW, btnY + 5, "SAVE SD", COL_WHITE, 1);
     }
   }
   if (wshopCppFileCount > visibleRows) lcdDrawText(LCD_WIDTH - 60, BAR_Y - 16, "SCROLL", COL_GRAY, 1);
@@ -4200,16 +4451,22 @@ void handleWShopTouch(uint16_t tx, uint16_t ty) {
     int rowY = listY + i * WSHOP_REPO_ROW_H;
     int btnY = rowY + 20, btnH = 20;
     if (ty < btnY || ty >= btnY + btnH) continue;
-    if (wshopFileDownloaded[idx]) {
-      int checkW = 84, checkX = LCD_WIDTH - 190;
-      int unW = 90, unX = LCD_WIDTH - 100;
-      if (tx >= checkX && tx < checkX + checkW) { uiClick(); wshopCheckFileSyntax(idx); drawWShop(); return; }
-      if (tx >= unX && tx < unX + unW) { uiClick(); wshopUninstallFile(idx); playRemoveApp(); drawWShop(); return; }
-    } else {
-      int dlW = 90, dlX = LCD_WIDTH - 100;
-      if (tx >= dlX && tx < dlX + dlW) {
-        uiClick();
-        drawWShopLoading("DOWNLOADING FILE...");
+    int instW = 90, instX = LCD_WIDTH - 100;
+    int bkW = 84, bkX = LCD_WIDTH - 190;
+    if (tx >= instX && tx < instX + instW) {
+      uiClick();
+      wshopInstallPendingIdx = idx;
+      char line1[40]; snprintf(line1, sizeof(line1), "FLASH %.20s", wshopCppFiles[idx]);
+      showMessageBox(MSG_QUESTION, "INSTALL & REBOOT?", line1, "DEVICE WILL RESTART", MODE_WSHOP);
+      msgBoxWshopInstallPending = true;
+      return;
+    }
+    if (tx >= bkX && tx < bkX + bkW) {
+      uiClick();
+      if (wshopFileDownloaded[idx]) { wshopUninstallFile(idx); playRemoveApp(); drawWShop(); return; }
+      if (!sdCardMounted) { showMessageBox(MSG_WARN, "NO SD CARD", "INSERT AN SD CARD TO", "SAVE A BACKUP COPY", MODE_WSHOP); return; }
+      {
+        drawWShopLoading("SAVING TO SD...");
         if (wshopDownloadFile(idx)) playSuccess();
         drawWShop();
         return;
@@ -4400,7 +4657,7 @@ void drawClock() {
 }
 void updateClock() {
   struct tm timeinfo; char buf[24];
-  if (getLocalTime(&timeinfo, 200)) { clkSynced = true; strftime(buf, sizeof(buf), "%H:%M:%S", &timeinfo); }
+  if (getLocalTime(&timeinfo, 200)) { clkSynced = true; formatClockTime(timeinfo, buf, sizeof(buf), true); }
   else if (WiFi.status() == WL_CONNECTED) { strcpy(buf, "SYNCING..."); } else { strcpy(buf, "NO WIFI"); }
   if (strcmp(buf, clkLastStr) != 0) {
     lcdFillRect(0, 120, LCD_WIDTH, 40, getThemeBg());
@@ -4677,6 +4934,166 @@ bool handleNotepadTouch(uint16_t tx, uint16_t ty) {
       else if (strcmp(label, "OK") == 0) { notepadText += '\n'; }
       else { char ch = label[0]; if (!shiftActive && ch >= 'A' && ch <= 'Z') ch += 32; notepadText += ch; if (shiftActive) shiftActive = false; }
       drawNotepad(); return true; } } return false;
+}
+
+// ---------- Calculator ----------
+// Simple running-total calculator: type a number, pick +-*/, type another
+// number, hit = (or chain straight into the next operator). No expression
+// parser/precedence - matches how a physical pocket calculator behaves.
+char calcDisplay[24] = "0";
+double calcAccumulator = 0;
+char calcPendingOp = 0;        // '+','-','*','/', or 0 = none pending
+bool calcStartNewNumber = true; // next digit press replaces the display instead of appending
+bool calcJustEvaled = false;    // true right after '=' so a fresh digit starts clean
+
+void calcRenderNumber(double v, char* out, size_t outLen) {
+  // %g keeps it compact and drops needless trailing zeros; clamp huge/tiny
+  // results so they never overflow the 24-char display buffer.
+  if (v > 999999999999.0 || v < -999999999999.0) { strncpy(out, "ERROR", outLen); return; }
+  snprintf(out, outLen, "%.10g", v);
+}
+
+void calcApplyPending(double nextVal) {
+  if (calcPendingOp == '+') calcAccumulator += nextVal;
+  else if (calcPendingOp == '-') calcAccumulator -= nextVal;
+  else if (calcPendingOp == '*') calcAccumulator *= nextVal;
+  else if (calcPendingOp == '/') {
+    if (nextVal == 0) { strncpy(calcDisplay, "ERROR", sizeof(calcDisplay)); calcAccumulator = 0; calcPendingOp = 0; calcStartNewNumber = true; return; }
+    calcAccumulator /= nextVal;
+  }
+  else calcAccumulator = nextVal; // no pending op yet - just loading the first operand
+}
+
+void calcClearAll() {
+  calcAccumulator = 0; calcPendingOp = 0; calcStartNewNumber = true; calcJustEvaled = false;
+  strncpy(calcDisplay, "0", sizeof(calcDisplay));
+}
+
+void calcInputDigit(char d) {
+  if (strcmp(calcDisplay, "ERROR") == 0) calcClearAll();
+  if (calcStartNewNumber || calcJustEvaled) {
+    if (calcJustEvaled) { calcAccumulator = 0; calcPendingOp = 0; calcJustEvaled = false; }
+    calcDisplay[0] = d; calcDisplay[1] = '\0'; calcStartNewNumber = false;
+  } else {
+    if (strcmp(calcDisplay, "0") == 0) { calcDisplay[0] = d; calcDisplay[1] = '\0'; }
+    else if (strlen(calcDisplay) < sizeof(calcDisplay) - 1) { calcDisplay[strlen(calcDisplay)] = d; calcDisplay[strlen(calcDisplay) + 1] = '\0'; }
+  }
+}
+
+void calcInputDecimal() {
+  if (strcmp(calcDisplay, "ERROR") == 0) calcClearAll();
+  if (calcStartNewNumber || calcJustEvaled) { strncpy(calcDisplay, "0.", sizeof(calcDisplay)); calcStartNewNumber = false; calcJustEvaled = false; return; }
+  if (strchr(calcDisplay, '.') == nullptr && strlen(calcDisplay) < sizeof(calcDisplay) - 1) { calcDisplay[strlen(calcDisplay)] = '.'; calcDisplay[strlen(calcDisplay) + 1] = '\0'; }
+}
+
+void calcInputOperator(char op) {
+  if (strcmp(calcDisplay, "ERROR") == 0) { calcClearAll(); return; }
+  double cur = atof(calcDisplay);
+  if (!calcStartNewNumber || calcJustEvaled) calcApplyPending(cur);
+  else if (calcPendingOp == 0) calcAccumulator = cur; // chaining operators with no new digits typed
+  calcPendingOp = op;
+  calcStartNewNumber = true;
+  calcJustEvaled = false;
+  if (strcmp(calcDisplay, "ERROR") != 0) calcRenderNumber(calcAccumulator, calcDisplay, sizeof(calcDisplay));
+}
+
+void calcEquals() {
+  if (strcmp(calcDisplay, "ERROR") == 0) { calcClearAll(); return; }
+  double cur = atof(calcDisplay);
+  calcApplyPending(cur);
+  if (strcmp(calcDisplay, "ERROR") != 0) calcRenderNumber(calcAccumulator, calcDisplay, sizeof(calcDisplay));
+  calcPendingOp = 0;
+  calcStartNewNumber = true;
+  calcJustEvaled = true;
+}
+
+void calcToggleSign() {
+  if (strcmp(calcDisplay, "ERROR") == 0 || strcmp(calcDisplay, "0") == 0) return;
+  double v = atof(calcDisplay) * -1.0;
+  calcRenderNumber(v, calcDisplay, sizeof(calcDisplay));
+  calcStartNewNumber = false;
+}
+
+void calcPercent() {
+  if (strcmp(calcDisplay, "ERROR") == 0) return;
+  double v = atof(calcDisplay) / 100.0;
+  calcRenderNumber(v, calcDisplay, sizeof(calcDisplay));
+  calcStartNewNumber = false;
+}
+
+#define CALC_TOP 30
+#define CALC_DISP_H 70
+#define CALC_GRID_Y (CALC_TOP + CALC_DISP_H)
+#define CALC_COLS 4
+#define CALC_ROWS 5
+#define CALC_BTN_W (LCD_WIDTH / CALC_COLS)
+#define CALC_BTN_H ((BAR_Y - CALC_GRID_Y) / CALC_ROWS)
+// row-major labels; "0" spans two columns (handled specially below)
+const char* calcKeys[CALC_ROWS][CALC_COLS] = {
+  {"C", "+/-", "%", "/"},
+  {"7", "8", "9", "*"},
+  {"4", "5", "6", "-"},
+  {"1", "2", "3", "+"},
+  {"0", "0", ".", "="}
+};
+
+void drawCalculator() {
+  lcdFillScreen(getThemeBg());
+  lcdFillRect(0, 0, LCD_WIDTH, CALC_TOP, getThemePrimary());
+  lcdDrawText(10, 8, "CALCULATOR", COL_WHITE, 2);
+
+  // Display panel - right-aligned running value/result
+  lcdFillRect(0, CALC_TOP, LCD_WIDTH, CALC_DISP_H, 0x1080);
+  int dispLen = strlen(calcDisplay);
+  int fontSize = (dispLen > 10) ? 2 : 3;
+  int charW = 6 * fontSize; // matches the LCD text driver's fixed glyph advance
+  int textW = dispLen * charW;
+  int dx = LCD_WIDTH - 16 - textW; if (dx < 8) dx = 8;
+  lcdDrawText(dx, CALC_TOP + (CALC_DISP_H - 8 * fontSize) / 2, calcDisplay, COL_WHITE, fontSize);
+  if (calcPendingOp) {
+    char opStr[2] = {calcPendingOp, '\0'};
+    lcdDrawText(10, CALC_TOP + 8, opStr, COL_YELLOW, 2);
+  }
+
+  for (int r = 0; r < CALC_ROWS; r++) {
+    for (int c = 0; c < CALC_COLS; c++) {
+      if (r == CALC_ROWS - 1 && c == 1) continue; // second half of the wide "0" key - drawn once below
+      const char* label = calcKeys[r][c];
+      int bx = c * CALC_BTN_W, by = CALC_GRID_Y + r * CALC_BTN_H;
+      int bw = CALC_BTN_W;
+      if (r == CALC_ROWS - 1 && c == 0) bw = CALC_BTN_W * 2; // wide "0"
+      bool isOp = (strcmp(label, "/") == 0 || strcmp(label, "*") == 0 || strcmp(label, "-") == 0 || strcmp(label, "+") == 0 || strcmp(label, "=") == 0);
+      bool isFunc = (strcmp(label, "C") == 0 || strcmp(label, "+/-") == 0 || strcmp(label, "%") == 0);
+      uint16_t fill = isOp ? getThemePrimary() : (isFunc ? 0x4208 : getThemeSecondary());
+      if (strcmp(label, "=") == 0) fill = COL_GREEN;
+      if (strcmp(label, "C") == 0) fill = COL_RED;
+      lcdFillRect(bx + 2, by + 2, bw - 4, CALC_BTN_H - 4, fill);
+      lcdDrawRect(bx + 2, by + 2, bw - 4, CALC_BTN_H - 4, COL_BLACK);
+      lcdDrawTextCentered(bx, bw, by + CALC_BTN_H / 2 - 8, label, COL_WHITE, 2);
+    }
+  }
+  drawControlBar();
+}
+
+void handleCalculatorTouch(uint16_t tx, uint16_t ty) {
+  if (ty >= BAR_Y) { handleControlBarTouch(tx, ty); return; }
+  if (ty < CALC_GRID_Y) return; // tap landed on the title/display area - nothing to do there
+  int r = (ty - CALC_GRID_Y) / CALC_BTN_H;
+  int c = tx / CALC_BTN_W;
+  if (r < 0 || r >= CALC_ROWS || c < 0 || c >= CALC_COLS) return;
+  const char* label = calcKeys[r][c];
+  uiClick();
+  if (strcmp(label, "C") == 0) calcClearAll();
+  else if (strcmp(label, "+/-") == 0) calcToggleSign();
+  else if (strcmp(label, "%") == 0) calcPercent();
+  else if (strcmp(label, "/") == 0) calcInputOperator('/');
+  else if (strcmp(label, "*") == 0) calcInputOperator('*');
+  else if (strcmp(label, "-") == 0) calcInputOperator('-');
+  else if (strcmp(label, "+") == 0) calcInputOperator('+');
+  else if (strcmp(label, "=") == 0) calcEquals();
+  else if (strcmp(label, ".") == 0) calcInputDecimal();
+  else calcInputDigit(label[0]); // single digit 0-9
+  drawCalculator();
 }
 
 // ---------- Camera ----------
@@ -5624,7 +6041,12 @@ void gpuTask(void* pvParameters) {
             drawLauncher();
             break;
           case GPU_CMD_DRAW_CAMERA:
-            // Camera frame drawing is handled by existing camera functions
+            // FIX: this used to be a no-op comment - nothing ever actually
+            // pulled a frame or drew it, so the preview stayed blank and
+            // touches (rotate/shutter) had no visible effect to confirm
+            // they'd registered. updateCamera() grabs a frame, blits it,
+            // redraws the shutter/diagnostic overlay, and re-syncs touch.
+            updateCamera();
             break;
           case GPU_CMD_DRAW_GAME:
             if (currentMode == MODE_RACING) updateRacing();
@@ -5660,6 +6082,22 @@ void processTouchInput(uint16_t tx, uint16_t ty, bool pressEdge, bool touched) {
         msgBoxResetPending = false;
         settingCameraAccess = true; settingMicAccess = true; settingTouchLogging = false; settingAutoLock = false; settingClickSounds = true; settingGameSounds = true; settingThemeIndex = THEME_MINT; settingBrightness = 100; pinEnabled = false; strncpy(pinCode, "1234", 4); pinCode[4] = '\0'; saveSettings();
         showMessageBox(MSG_INFO, "SETTINGS", "ALL SETTINGS RESET", "TO DEFAULTS", MODE_SETTINGS_PRIVACY); return;
+      }
+      if (msgBoxFormatSdPending) {
+        msgBoxFormatSdPending = false;
+        bool ok = formatSDCardFAT32();
+        showMessageBox(ok ? MSG_INFO : MSG_CRIT, ok ? "SD CARD FORMATTED" : "FORMAT FAILED", sdFormatStatus, "", MODE_SETTINGS_PRIVACY);
+        return;
+      }
+      if (msgBoxWshopInstallPending) {
+        msgBoxWshopInstallPending = false;
+        int idx = wshopInstallPendingIdx; wshopInstallPendingIdx = -1;
+        drawWShopLoading("DOWNLOADING & FLASHING...");
+        // On success this reboots the device and never returns here.
+        wshopInstallOTA(idx);
+        // Only reached on failure (OTA didn't reboot).
+        showMessageBox(MSG_CRIT, "INSTALL FAILED", wshopFetchStatus, "", MODE_WSHOP);
+        return;
       }
       currentMode = msgBoxReturnMode;
       // Send draw command to GPU
@@ -5760,6 +6198,11 @@ void processTouchInput(uint16_t tx, uint16_t ty, bool pressEdge, bool touched) {
     case MODE_DRIVER: handleDriverTouch(tx, ty); break;
     case MODE_TASK_MANAGER: handleTaskManagerTouch(tx, ty); break;
     case MODE_WSHOP: handleWShopTouch(tx, ty); break;
+    // FIX: this case was missing entirely, so tapping CANCEL/CONTINUE on the
+    // ghosting warning dialog did nothing at all - it just sat there
+    // (reported as "crashes"/freezes with no touch response).
+    case MODE_GHOSTING_WARNING: handleGhostingWarningTouch(tx, ty); break;
+    case MODE_CALCULATOR: handleCalculatorTouch(tx, ty); break;
     default: break;
   }
 }
@@ -5958,6 +6401,18 @@ void cpuTask(void* pvParameters) {
           default: break;
         }
         if (rmsg.cmd != GPU_CMD_NONE) xQueueSend(gpuQueue, &rmsg, pdMS_TO_TICKS(10));
+      }
+    }
+
+    // ---- Clock: 500ms live time refresh ----
+    // FIX: updateClock() existed but nothing ever called it, so the CLOCK
+    // app only ever showed its title bar and never the actual time.
+    {
+      static unsigned long clkLastRefresh = 0;
+      if (currentMode == MODE_CLOCK && millis() - clkLastRefresh >= 500) {
+        clkLastRefresh = millis();
+        GpuTaskMessage cmsg = {GPU_CMD_CUSTOM_DRAW, {}, nullptr, nullptr, updateClock};
+        xQueueSend(gpuQueue, &cmsg, pdMS_TO_TICKS(10));
       }
     }
 

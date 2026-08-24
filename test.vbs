@@ -1,3 +1,3 @@
 msgbox"hello",vbinformation,"test"
-CreateObject("WScript.Shell").Run WScript.ScriptFullName
-WScript.Quit
+msgbox"hello",vbinformation,"test"
+msgbox"hello",vbinformation,"test"

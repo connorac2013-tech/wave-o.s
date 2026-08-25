@@ -1,4 +1,9 @@
-msgbox"This script is for WAVE O.S version 9.02 or greater this may not work correctly",vbexclamation,"Compatibility warning"
+V = ESver
+if V >= 9.02 then
+else
+msgbox"This script is for WAVE O.S version 9.02 or greater.",vbexclamation,"Compatibility warning"
+msgbox"this may not work correctly.",vbexclamation,"Compatibility warning (Con)"
+end if
 ESpindesk"VGA_PRO"
 ESstartfiletask
 ESstartupdateutillity

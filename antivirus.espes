@@ -1,4 +1,4 @@
 msgbox"Wave O.S Antivirus has failed to int.",vbcritical,"Wave O.S"
-ESpindesk
+ESpindesk "Wdefence"
 msgbox"press 'OK' to restart",vbinformation,"Wave O.S"
 ESrestart

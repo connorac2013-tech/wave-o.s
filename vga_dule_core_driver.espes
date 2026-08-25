@@ -13,3 +13,5 @@ if A = vbyes then
 ESrestart
 else
 endif
+msgbox"This is a legacy note, if this is the only msg you",vbinformation,"VGA PRO"
+msgbox"saw, you are not elagable for this program.",vbinformation, "VGA PRO (CON)"

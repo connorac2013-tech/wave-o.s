@@ -1,3 +1,4 @@
+msgbox"This script is for WAVE O.S version 9.02 or greater this may not work correctly",vbexclamation,"Compatibility warning"
 ESpindesk"VGA_PRO"
 ESstartfiletask
 ESstartupdateutillity

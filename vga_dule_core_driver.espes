@@ -12,4 +12,5 @@ ESrestart
 else
 msgbox"Legacy note: if this is the only message you saw,",vbinformation,"VGA PRO"
 msgbox"you are likely not eligible for this program.",vbinformation,"VGA PRO (CON)"
+msgbox"reason: missing dependencies",vbinformation,"VGA PRO (CON 2)"
 end if

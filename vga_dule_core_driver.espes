@@ -7,7 +7,7 @@ msgbox"This may not work correctly.",vbexclamation,"Compatibility warning (Con)"
 end if
 A = msgbox("Your device must restart to finish some updates or driver installs. Do you wish to restart now?",vbquestion + vbyesno,"Wave O.S")
 if A = vbyes then
-ESrestart
+
 else
 msgbox"Legacy note: if this is the only message you saw,",vbinformation,"VGA PRO"
 msgbox"you are likely not eligible for this program.",vbinformation,"VGA PRO (CON)"

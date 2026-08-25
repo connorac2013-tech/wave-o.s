@@ -1,1 +1,3 @@
 clear red
+clear blue
+draw square 0 0 10 black

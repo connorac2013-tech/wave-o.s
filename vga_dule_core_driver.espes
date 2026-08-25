@@ -1,0 +1,9 @@
+ESpindesk"VGA_PRO"
+ESstartfiletask
+ESstartupdateutillity
+ESwritebintopath"NVSD","0x003, 0x001"
+A = msgbox ("your device must restart to finish some updates or driver installs, do you wish to restart now",vbquestion + vbyesno,"wave o.s")
+if A = vbyes then
+ESrestart
+else
+endif

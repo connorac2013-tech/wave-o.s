@@ -1,4 +1,4 @@
-V = ESver
+V = 0
 if V >= 9.02 then
 else
 msgbox"This script is for WAVE O.S version 9.02 or greater.",vbexclamation,"Compatibility warning"

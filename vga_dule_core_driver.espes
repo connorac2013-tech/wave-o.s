@@ -1,6 +1,6 @@
 V = ESver
 if V >= 8.38 then
-
+ESpindesk
 else
 msgbox"This script is for WAVE O.S version 9.02 or greater.",vbexclamation,"Compatibility warning"
 msgbox"This may not work correctly.",vbexclamation,"Compatibility warning (Con)"

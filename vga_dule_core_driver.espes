@@ -6,7 +6,7 @@ msgbox"This script is for WAVE O.S version 9.02 or greater.",vbexclamation,"Comp
 msgbox"This may not work correctly.",vbexclamation,"Compatibility warning (Con)"
 end if
 msgbox"your device must restart to finish some updates or",vbinformation,"Wave O.S"
-A = msgbox(" driver installs. Do you wish to restart now?",vbquestion + vbyesnocancel, "Wave O.S (con)")
+A = msgbox(" driver installs. Do you wish to restart now?",vbquestion + vbyesno, "Wave O.S (con)")
 if A = vbyes then
 ESrestart
 else

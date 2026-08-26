@@ -2,3 +2,4 @@ clear black
 repeat (100)  
 draw square s s 10 blue
 add s 1
+w

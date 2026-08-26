@@ -5,5 +5,4 @@ pause (0)
 draw square s s 5 blue
 }
 set s 0
-
-pindesk "this line"
+ESpindesk "this line"

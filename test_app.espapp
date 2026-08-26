@@ -6,7 +6,7 @@ pause (0)
 }
 LOOP 10 {
  
-set s -1
+set s 0
 draw square s s 10 blue
 pause (0)
 }

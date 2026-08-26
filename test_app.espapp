@@ -1,5 +1,5 @@
-clear black
 repeat (100)  
+clear black
 draw square s s 10 blue
-add s 1
-w
+add s 80
+add s -80

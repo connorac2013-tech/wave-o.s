@@ -6,3 +6,4 @@ draw square s s 5 blue
 }
 set s 0
 
+pindesk "this line"

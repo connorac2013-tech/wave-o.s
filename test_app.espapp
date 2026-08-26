@@ -1,10 +1,10 @@
 LOOP 80 {
 clear black 
-ADD s1
+ADD s 1
 draw square s s s red
 }
 LOOP 80 {
 clear black 
-ADD s-1
+ADD s -1
 draw square s s s red
 }

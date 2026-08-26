@@ -1,4 +1,4 @@
 clear black
 add s -100
 repeat (100) add s 1 
-draw square s,s blue
+draw square s s blue

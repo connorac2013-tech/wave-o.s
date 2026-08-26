@@ -1,12 +1,11 @@
-LOOP 10 {
-
+LOOP 80 {
 ADD s 1
 draw square s s 10 red
 pause (0)
 }
-LOOP 10 {
- 
 set s 0
+LOOP 80 { 
+add s 1
 draw square s s 10 blue
 pause (0)
 }

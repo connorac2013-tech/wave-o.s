@@ -4,8 +4,4 @@ draw square s s 10 red
 pause (0)
 }
 set s 0
-LOOP 10 { 
-add s 1
-draw square s s 10 blue
-pause (0)
-}
+

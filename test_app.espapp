@@ -1,12 +1,12 @@
 LOOP 30 {
-clear black 
+
 ADD s 1
 draw square s s 10 red
-pause (2)
+pause (0)
 }
 LOOP 30 {
-clear black 
+ 
 ADD s -1
 draw square s s 10 blue
-pause (2)
+pause (0)
 }

@@ -2,11 +2,11 @@ LOOP 80 {
 clear black 
 ADD s 1
 draw square s s 10 red
-pause (20)
+pause (2)
 }
 LOOP 80 {
 clear black 
 ADD s -1
 draw square s s 10 blue
-pause (20)
+pause (2)
 }

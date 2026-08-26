@@ -1,5 +1,5 @@
-repeat (100)  
-clear black
-draw square s s 10 blue
-add s 80
-add s -80
+CLEAR black
+SET s 1
+REPEAT 50 THEN DRAW SQUARE s s 10 blue
+ADD s 1
+IF s > 80 THEN SET s 1

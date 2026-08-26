@@ -2,6 +2,7 @@ LOOP 10 {
 ADD s 1
 draw square s s 10 red
 pause (0)
+draw square s s 5 blue
 }
 set s 0
 

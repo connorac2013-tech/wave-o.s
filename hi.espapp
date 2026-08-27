@@ -14,3 +14,19 @@ set b 1
 }
 ESpindesk"grid"
 }
+clear black
+set h 1
+
+loop 100{
+set h 1
+loop 100{
+draw square b h 10 blue
+add b 13
+}
+loop 6{
+add h 2
+draw square 1 h blue
+set b 1
+}
+ESpindesk"grid"
+}

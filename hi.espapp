@@ -1,7 +1,7 @@
 clear black
 set h 1
 
-loop 100{
+
 
 loop 100{
 draw square b h 10 red
@@ -13,5 +13,5 @@ draw square 1 h 1 blue
 set b 1
 }
 ESpindesk"grid"
-}
+
 clear red

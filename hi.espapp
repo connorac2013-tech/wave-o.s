@@ -1,4 +1,4 @@
-tb black
+tb red
 set h 1
 loop 23{
 loop 40{
@@ -12,7 +12,7 @@ set b 1
 }
 ESpindesk"grid"
 }
-
+tb blue
 set h 1
 loop 23{
 loop 40{
@@ -26,6 +26,7 @@ set b 1
 }
 ESpindesk"grid"
 }
+tb green
 set h 1
 loop 23{
 loop 40{
@@ -36,6 +37,7 @@ loop 6{
 add h 2
 draw square 1 h 1 blue
 set b 1
+tb black
 }
 ESpindesk"grid"
 }

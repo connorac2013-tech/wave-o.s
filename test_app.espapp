@@ -1,13 +1,13 @@
 LOOP 90 {
 ADD s 1
 draw square s s 10 red
-pause (0)
+pause (1)
 draw square s s 5 blue
 }
 LOOP 90 {
 ADD s -1
 draw square s s 10 blue
-pause (0)
+pause (1)
 draw square s s 5 red
 }
 

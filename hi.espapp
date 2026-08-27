@@ -1,9 +1,7 @@
 clear black
 set h 1
-
-
 loop 100{
-loop 100{
+loop 30{
 draw square b h 10 red
 add b 13
 }

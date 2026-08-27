@@ -12,7 +12,7 @@ set b 1
 }
 ESpindesk"grid"
 }
-clear black
+
 set h 1
 loop 23{
 loop 40{
@@ -24,19 +24,19 @@ add h 2
 draw square 1 h 1 blue
 set b 1
 }
-clear black
+ESpindesk"grid"
+}
 set h 1
 loop 23{
 loop 40{
-draw square b h 10 red
+draw square b h 10 green
 add b 13
 }
 loop 6{
 add h 2
-draw square 1 h 1 green
+draw square 1 h 1 blue
 set b 1
 }
 ESpindesk"grid"
 }
-ESpindesk"grid"
-}
+

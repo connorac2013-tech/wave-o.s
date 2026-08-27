@@ -3,7 +3,7 @@ set h 1
 
 loop 100{
 
-loop 10{
+loop 100{
 draw square b h 10 red
 add b 13
 }

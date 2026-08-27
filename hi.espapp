@@ -1,4 +1,4 @@
-clear black
+
 set h 1
 loop 23{
 loop 40{

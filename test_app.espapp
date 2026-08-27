@@ -1,14 +1,14 @@
-LOOP 90 {
+LOOP 190 {
 ADD s 1
 draw square s s 10 red
-pause (1)
 draw square s s 5 blue
+pause (1)
+
 }
-LOOP 90 {
+LOOP 190 {
 ADD s -1
 draw square s s 10 blue
-pause (1)
 draw square s s 5 red
+pause (1)
 }
-
 ESpindesk "this line"

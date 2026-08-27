@@ -1,50 +1,6 @@
-
-
-CLEAR black
-SET dotX 50
-SET dotY 50
-SET size 10
-SET color 7      
-ESPINDESK "Touch Move Dot"
-
-LOOP 9999 {
-  CLEAR black
-
-
-  DRAW SQUARE dotX dotY size color
-
-  
-  TOUCH X touchX
-  TOUCH Y touchY
-
-
-  READ MIC mic
-
-
-  IF touchX > -1 THEN {
-    
-
-    
-    IF mic < 25 THEN {
-      ADD dotY -5
-    }
-
-  
-    IF mic > 24 THEN IF mic < 50 THEN {
-      ADD dotY 5
-    }
-
-  
-    IF mic > 49 THEN IF mic < 75 THEN {
-      ADD dotX -5
-    }
-
-    
-    IF mic > 74 THEN {
-      ADD dotX 5
-    }
-  }
-
-  # small pause so movement is visible
-  PAUSE(50)
+loop 10{
+draw square l h 10 red
+add l 13
 }
+
+add 13 h

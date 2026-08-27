@@ -1,0 +1,50 @@
+# Touch-to-random-move dot app
+
+CLEAR black
+SET dotX 50
+SET dotY 50
+SET size 10
+SET color 7      # bright color
+ESPINDESK "Touch Move Dot"
+
+LOOP 9999 {
+  CLEAR black
+
+  # draw the dot
+  DRAW SQUARE dotX dotY size color
+
+  # read touch
+  TOUCH X touchX
+  TOUCH Y touchY
+
+  # read mic as a pseudo-random source (0–100)
+  READ MIC mic
+
+  # if screen is being touched anywhere, move dot in a random-ish direction
+  IF touchX > -1 THEN {
+    # use mic value to pick direction
+
+    # mic 0–24: move up
+    IF mic < 25 THEN {
+      ADD dotY -5
+    }
+
+    # mic 25–49: move down
+    IF mic > 24 THEN IF mic < 50 THEN {
+      ADD dotY 5
+    }
+
+    # mic 50–74: move left
+    IF mic > 49 THEN IF mic < 75 THEN {
+      ADD dotX -5
+    }
+
+    # mic 75–100: move right
+    IF mic > 74 THEN {
+      ADD dotX 5
+    }
+  }
+
+  # small pause so movement is visible
+  PAUSE(50)
+}

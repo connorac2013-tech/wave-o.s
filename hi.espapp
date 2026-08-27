@@ -11,8 +11,6 @@ draw square 1 h 1 blue
 set b 1
 }
 ESpindesk"grid"
-ESpindesk"grid2"
-
 }
 pause (500)
 

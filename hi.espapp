@@ -9,7 +9,7 @@ add b 13
 }
 loop 6{
 add h 2
-draw square 1 h blue
+draw square 1 h 1 blue
 set b 1
 }
 ESpindesk"grid"

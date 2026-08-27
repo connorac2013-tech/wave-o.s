@@ -12,5 +12,6 @@ set b 1
 }
 ESpindesk"grid"
 }
+pause (500)
 clear red
 pause (500)

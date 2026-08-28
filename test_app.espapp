@@ -12,5 +12,5 @@ draw square s s 5 red
 pause (1)
 }
 ESpindesk "this line"
-txt 150 270 1 "IDK, I was board" gray
-tb gray
+txt 0 270 1 "IDK, I was board" gray
+tb black

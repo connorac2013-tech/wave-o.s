@@ -1,4 +1,4 @@
-draw rect 0 0 320 320 white
+draw rect 0 0 480 320 white
 tb black
 txt 10 10 2 "CPU:" black
   txt 40 10 2 <cpu%> black

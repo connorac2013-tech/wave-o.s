@@ -1,9 +1,159 @@
-LOOP 10 {
-ADD s 1
-draw square s s 10 red
-pause (0)
-draw square s s 5 blue
-}
-set s 0
+' Multiplication Facts Quiz - 0 to 12 times tables
+' Demonstrates the new ESPAPP commands: BOX (touch buttons), FUNCTION/CALL,
+' RAND and IF, layered on top of the existing CLEAR/TXT/SET/ADD/LOOP/PAUSE.
+'
+' Each unpaused frame:
+'   - generates a new A x B problem the first time through (or after the
+'     previous one was answered)
+'   - draws the problem and the digits typed so far
+'   - draws a 0-9 keypad plus CLR/OK as BOX touch buttons
+'   - a digit key shifts that digit onto the end of "entered"
+'   - CLR resets the typed answer back to 0
+'   - OK compares "entered" to the correct product, draws a green check
+'     or a red X, holds it on screen for a bit (PAUSE), then starts a
+'     fresh problem
 
-pindesk "this line"
+TB BLUE
+ESpindesk "math"
+
+IF started = 0 THEN CALL new problem
+SET started 1
+
+CLEAR
+TXT 10 10 3 <a> WHITE
+TXT 70 10 3 "X" WHITE
+TXT 100 10 3 <b> WHITE
+TXT 160 10 3 "=" WHITE
+TXT 200 10 3 <entered> YELLOW
+
+' --- Keypad row 1: 0 1 2 3 4 ---
+BOX k0 10 70 40 40 GRAY
+TXT 24 82 2 "0" WHITE
+BOX k1 55 70 40 40 GRAY
+TXT 69 82 2 "1" WHITE
+BOX k2 100 70 40 40 GRAY
+TXT 114 82 2 "2" WHITE
+BOX k3 145 70 40 40 GRAY
+TXT 159 82 2 "3" WHITE
+BOX k4 190 70 40 40 GRAY
+TXT 204 82 2 "4" WHITE
+
+' --- Keypad row 2: 5 6 7 8 9 ---
+BOX k5 10 115 40 40 GRAY
+TXT 24 127 2 "5" WHITE
+BOX k6 55 115 40 40 GRAY
+TXT 69 127 2 "6" WHITE
+BOX k7 100 115 40 40 GRAY
+TXT 114 127 2 "7" WHITE
+BOX k8 145 115 40 40 GRAY
+TXT 159 127 2 "8" WHITE
+BOX k9 190 115 40 40 GRAY
+TXT 204 127 2 "9" WHITE
+
+' --- CLR / OK row ---
+BOX kclr 10 160 100 40 ORANGE
+TXT 30 172 2 "CLR" BLACK
+BOX kok 120 160 100 40 GREEN
+TXT 150 172 2 "OK" BLACK
+
+' --- digit-entry handling: each key sets which digit, then shifts it in ---
+IF k0 = 1 THEN SET digit 0
+IF k0 = 1 THEN CALL enter
+IF k1 = 1 THEN SET digit 1
+IF k1 = 1 THEN CALL enter
+IF k2 = 1 THEN SET digit 2
+IF k2 = 1 THEN CALL enter
+IF k3 = 1 THEN SET digit 3
+IF k3 = 1 THEN CALL enter
+IF k4 = 1 THEN SET digit 4
+IF k4 = 1 THEN CALL enter
+IF k5 = 1 THEN SET digit 5
+IF k5 = 1 THEN CALL enter
+IF k6 = 1 THEN SET digit 6
+IF k6 = 1 THEN CALL enter
+IF k7 = 1 THEN SET digit 7
+IF k7 = 1 THEN CALL enter
+IF k8 = 1 THEN SET digit 8
+IF k8 = 1 THEN CALL enter
+IF k9 = 1 THEN SET digit 9
+IF k9 = 1 THEN CALL enter
+
+IF kclr = 1 THEN SET entered 0
+
+' PAUSE only makes sense at the top level (see the PAUSE/CALL docs above),
+' so the compare-and-pause sequence lives here, not inside a FUNCTION.
+IF kok = 1 THEN CALL check answer
+IF kok = 1 THEN PAUSE 1200
+IF kok = 1 THEN SET started 0
+
+FUNCTION new problem {
+  ' product = a * b via repeated addition, unrolled 12 times (b maxes at
+  ' 12) instead of LOOP - LOOP needs the top-level per-frame loop stack,
+  ' which a CALLed FUNCTION body doesn't have (see the CALL docs above),
+  ' so FUNCTION bodies stick to straight-line SET/ADD/IF/CALL/BOX/RAND.
+  RAND a 12
+  RAND b 12
+  SET entered 0
+  SET product 0
+  SET mulcount 0
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+  IF mulcount < b THEN ADD product a
+  ADD mulcount 1
+}
+
+FUNCTION enter {
+  ' entered = entered * 10 + digit - no MUL command, and (as noted in
+  ' "new problem" above) no LOOP inside a FUNCTION body either, so *10 is
+  ' 10 unrolled ADDs of the old value of "entered" into a fresh total.
+  SET tmp 0
+  ADD tmp entered
+  ADD tmp entered
+  ADD tmp entered
+  ADD tmp entered
+  ADD tmp entered
+  ADD tmp entered
+  ADD tmp entered
+  ADD tmp entered
+  ADD tmp entered
+  ADD tmp entered
+  SET entered tmp
+  ADD entered digit
+}
+
+FUNCTION check answer {
+  SET correct 0
+  IF entered = product THEN SET correct 1
+  IF correct = 1 THEN CALL show correct
+  IF correct = 0 THEN CALL show wrong
+}
+
+FUNCTION show correct {
+  DRAW SQUARE 250 60 60 GREEN
+  TXT 265 75 4 "OK" BLACK
+}
+
+FUNCTION show wrong {
+  DRAW SQUARE 250 60 60 RED
+  TXT 268 75 4 "X" WHITE
+}

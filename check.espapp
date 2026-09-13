@@ -2,11 +2,16 @@
 ' Demonstrates the new ESPAPP commands: BOX (touch buttons), FUNCTION/CALL,
 ' RAND and IF, layered on top of the existing CLEAR/TXT/SET/ADD/LOOP/PAUSE.
 '
+' Full-screen layout: drawable area is 480 x 280 (screen is 480x320, bottom
+' 40px is the taskbar) - the keypad, problem text and feedback box are all
+' laid out to use that full width/height instead of a cramped corner.
+'
 ' Each unpaused frame:
 '   - generates a new A x B problem the first time through (or after the
 '     previous one was answered)
 '   - draws the problem and the digits typed so far
-'   - draws a 0-9 keypad plus CLR/OK as BOX touch buttons
+'   - draws a 0-9 keypad (5 cols x 2 rows spanning the full width) plus a
+'     full-width CLR/OK row as BOX touch buttons
 '   - a digit key shifts that digit onto the end of "entered"
 '   - CLR resets the typed answer back to 0
 '   - OK compares "entered" to the correct product, draws a green check
@@ -14,47 +19,49 @@
 '     fresh problem
 
 TB BLUE
-ESpindesk "math"
 
 IF started = 0 THEN CALL new problem
 SET started 1
 
 CLEAR
-TXT 10 10 3 <a> WHITE
-TXT 70 10 3 "X" WHITE
-TXT 100 10 3 <b> WHITE
-TXT 160 10 3 "=" WHITE
-TXT 200 10 3 <entered> YELLOW
+TXT 20 15 4 <a> WHITE
+TXT 100 15 4 "X" WHITE
+TXT 140 15 4 <b> WHITE
+TXT 220 15 4 "=" WHITE
+TXT 260 15 4 <entered> YELLOW
 
-' --- Keypad row 1: 0 1 2 3 4 ---
-BOX k0 10 70 40 40 GRAY
-TXT 24 82 2 "0" WHITE
-BOX k1 55 70 40 40 GRAY
-TXT 69 82 2 "1" WHITE
-BOX k2 100 70 40 40 GRAY
-TXT 114 82 2 "2" WHITE
-BOX k3 145 70 40 40 GRAY
-TXT 159 82 2 "3" WHITE
-BOX k4 190 70 40 40 GRAY
-TXT 204 82 2 "4" WHITE
+' --- feedback box, top-right, clear of the problem text ---
+BOX fbslot 400 5 70 60 BLACK
+
+' --- Keypad row 1: 0 1 2 3 4 (5 columns spanning the full 480px width) ---
+BOX k0 8 90 88 70 GRAY
+TXT 40 115 3 "0" WHITE
+BOX k1 102 90 88 70 GRAY
+TXT 134 115 3 "1" WHITE
+BOX k2 196 90 88 70 GRAY
+TXT 228 115 3 "2" WHITE
+BOX k3 290 90 88 70 GRAY
+TXT 322 115 3 "3" WHITE
+BOX k4 384 90 88 70 GRAY
+TXT 416 115 3 "4" WHITE
 
 ' --- Keypad row 2: 5 6 7 8 9 ---
-BOX k5 10 115 40 40 GRAY
-TXT 24 127 2 "5" WHITE
-BOX k6 55 115 40 40 GRAY
-TXT 69 127 2 "6" WHITE
-BOX k7 100 115 40 40 GRAY
-TXT 114 127 2 "7" WHITE
-BOX k8 145 115 40 40 GRAY
-TXT 159 127 2 "8" WHITE
-BOX k9 190 115 40 40 GRAY
-TXT 204 127 2 "9" WHITE
+BOX k5 8 170 88 70 GRAY
+TXT 40 195 3 "5" WHITE
+BOX k6 102 170 88 70 GRAY
+TXT 134 195 3 "6" WHITE
+BOX k7 196 170 88 70 GRAY
+TXT 228 195 3 "7" WHITE
+BOX k8 290 170 88 70 GRAY
+TXT 322 195 3 "8" WHITE
+BOX k9 384 170 88 70 GRAY
+TXT 416 195 3 "9" WHITE
 
-' --- CLR / OK row ---
-BOX kclr 10 160 100 40 ORANGE
-TXT 30 172 2 "CLR" BLACK
-BOX kok 120 160 100 40 GREEN
-TXT 150 172 2 "OK" BLACK
+' --- CLR / OK row, full width, just above the taskbar ---
+BOX kclr 8 250 228 26 ORANGE
+TXT 90 257 2 "CLR" BLACK
+BOX kok 244 250 228 26 GREEN
+TXT 330 257 2 "OK" BLACK
 
 ' --- digit-entry handling: each key sets which digit, then shifts it in ---
 IF k0 = 1 THEN SET digit 0
@@ -149,11 +156,11 @@ FUNCTION check answer {
 }
 
 FUNCTION show correct {
-  DRAW SQUARE 250 60 60 GREEN
-  TXT 265 75 4 "OK" BLACK
+  DRAW SQUARE 400 5 60 GREEN
+  TXT 418 20 4 "OK" BLACK
 }
 
 FUNCTION show wrong {
-  DRAW SQUARE 250 60 60 RED
-  TXT 268 75 4 "X" WHITE
+  DRAW SQUARE 400 5 60 RED
+  TXT 425 20 4 "X" WHITE
 }

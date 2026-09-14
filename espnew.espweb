@@ -1,14 +1,15 @@
 ESPNEW
 function setup {
 clear white
-txt "initializing" 0 0 4 black
+txt 0 0 4 "initializing" black
 loop 10 {
 draw square x 280 10 green
 add x 20
 pause 1000
 }
 clear black
+add initOK 1
 }
 function loop {
-txt 0 0 1 "an error occurred and the program could not initialize." white 
+txt 0 0 1 "ready" white
 }

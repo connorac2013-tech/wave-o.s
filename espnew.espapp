@@ -1,0 +1,13 @@
+ESPNEW
+function setup {
+clear white
+txt "initializing" 0 0 4 black
+loop 10 {
+draw square x 280 10 green
+add x 20
+}
+clear black
+}
+function loop {
+txt 0 0 3 "an error occurred and the program could not initialize." white 
+}

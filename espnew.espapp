@@ -10,5 +10,5 @@ pause 20
 clear black
 }
 function loop {
-txt 0 0 3 "an error occurred and the program could not initialize." white 
+txt 0 0 1 "an error occurred and the program could not initialize." white 
 }

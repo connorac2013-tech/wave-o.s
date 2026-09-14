@@ -5,7 +5,7 @@ txt "initializing" 0 0 4 black
 loop 10 {
 draw square x 280 10 green
 add x 20
-pause 20
+pause (20)
 }
 clear black
 }

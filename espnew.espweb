@@ -2,10 +2,10 @@ ESPNEW
 function setup {
 clear white
 txt 0 0 4 "initializing" black
-loop 10 {
+loop 1000 {
 draw square x 280 10 green
 add x 20
-pause 1000
+pause 10
 }
 clear black
 add initOK 1

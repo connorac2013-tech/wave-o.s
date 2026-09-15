@@ -30,7 +30,7 @@ pause 1000
 clear black
 espexit
 }
-else {
+if osver < 11102 {
 box test 150 150 50 50 red
 txt 150 150 1 "exit" black
 if test > 0 {
@@ -41,7 +41,7 @@ espexit
 }
 }
 note{
-version: 0.12
+version: 1.4
 author: wave o.s developer
 this is a test app to check the newly implemented
 'espnew' command
@@ -49,6 +49,7 @@ you can find this exact app on the wave surfer app
 REQUIREMENTS: 
 wave o.s 11 version 11.100 or greater
 also stay tuned for wave o.s 
+with the new implamented 'espexit' command
 
 }
 }

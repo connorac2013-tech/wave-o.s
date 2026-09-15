@@ -2,8 +2,13 @@ ESPNEW
 function setup {
 clear white
 txt 0 0 4 "initializing" black
-loop 1000 {
-draw square x 280 10 green
+loop 56 {
+draw square x 230 10 black
+add x 9
+pause 0
+}
+loop 24 {
+draw square x 230 10 green
 add x 20
 pause 10
 }
@@ -14,7 +19,7 @@ function loop {
 txt 0 0 1 "ready" white
 }
 note{
-version: 0.01
+version: 0.11
 author: wave o.s developer
 this is a test app to check the newly implemented
 'espnew' command

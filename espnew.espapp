@@ -11,13 +11,13 @@ pause 0
 loop 24 {
 draw square x 230 10 green
 add x 20
-pause 10
+pause 100
 }
 clear black
 add initOK 1
 }
 function loop {
-if osver > 11.98 txt 0 0 1 "device must be updated" red
+if osver > 11.98 then txt 0 0 1 "device must be updated" red
 
 
 if osver < 11.98 then txt 0 0 1 "device is updated" green

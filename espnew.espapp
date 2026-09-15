@@ -4,12 +4,12 @@ function setup {
 clear white
 txt 0 0 4 "initializing" black
 loop 56 {
-draw square x 230 10 black
+draw square x 240 10 black
 add x 9
 pause 0
 }
 loop 24 {
-draw square x 230 10 green
+draw square x 240 10 green
 add x 20
 pause 100
 }
@@ -17,10 +17,9 @@ clear black
 add initOK 1
 }
 function loop {
-if osver > 11.98 then txt 0 0 1 "device must be updated" red
+if osver < 11.98 then txt 0 0 1 "device must be updated" red
 
-
-if osver < 11.98 then txt 0 0 1 "device is updated" green
+if osver > 11.98 then txt 0 0 1 "device is updated" green
 
 note{
 version: 0.12

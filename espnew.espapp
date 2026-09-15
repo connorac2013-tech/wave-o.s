@@ -1,5 +1,6 @@
 ESPNEW
 function setup {
+
 clear white
 txt 0 0 4 "initializing" black
 loop 56 {
@@ -16,14 +17,18 @@ clear black
 add initOK 1
 }
 function loop {
-txt 0 0 1 "ready" white
-}
+if osver > 11.98 txt 0 0 1 "device must be updated" red
+
+
+if osver < 11.98 then txt 0 0 1 "device is updated" green
+
 note{
-version: 0.11
+version: 0.12
 author: wave o.s developer
 this is a test app to check the newly implemented
 'espnew' command
 you can find this exact app on the wave surfer app
 REQUIREMENTS: 
-wave o.s 11 version 11.97 or greater
+wave o.s 11 version 11.99 or greater
+also stay tuned for wave o.s 
 }

@@ -30,6 +30,15 @@ pause 1000
 clear black
 espexit
 }
+else {
+box test 150 150 50 50 red
+txt 150 150 1 "exit" black
+if test > 0 {
+clear red
+pause 1000
+clear black
+espexit
+}
 }
 note{
 version: 0.12

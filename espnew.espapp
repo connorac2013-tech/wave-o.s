@@ -1,6 +1,6 @@
 ESPNEW
 function setup {
-
+ESpindesk
 clear white
 txt 0 0 4 "initializing" black
 loop 56 {

@@ -18,10 +18,11 @@ clear black
 add initOK 1
 }
 function loop {
-if osver < 11102 then txt 0 0 3 "device must be updated" red
+if osver < 1200 then txt 0 0 3 "device must be updated" red
 
-if osver > 11102 then txt 0 0 3 "device is updated" green
-if osver > 11102 {
+if osver > 1199 then txt 0 0 3 "device is updated" green
+
+if osver > 1199 {
 box test 150 150 50 50 green
 txt 150 150 1 "exit" black
 if test > 0 {
@@ -30,7 +31,8 @@ pause 1000
 clear black
 espexit
 }
-if osver < 11102 {
+}
+else {
 box test 150 150 50 50 red
 txt 150 150 1 "exit" black
 if test > 0 {
@@ -40,6 +42,7 @@ clear black
 espexit
 }
 }
+
 note{
 version: 1.4
 author: wave o.s developer

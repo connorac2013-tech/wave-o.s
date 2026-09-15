@@ -18,11 +18,11 @@ clear black
 add initOK 1
 }
 function loop {
-if osver < 12000 then txt 0 0 3 "device must be updated" red
+if osver < 1200 then txt 0 0 3 "device must be updated" red
 
-if osver > 11990 then txt 0 0 3 "device is updated" green
+if osver > 1199 then txt 0 0 3 "device is updated" green
 
-if osver > 11990 {
+if osver > 1199 {
 box test 150 150 50 50 green
 txt 150 150 1 "exit" black
 if test > 0 {
